@@ -1,12 +1,12 @@
-
 import streamlit as st
 import pandas as pd
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
+import io
 
 st.set_page_config(page_title="Gestão de Estoque Olist", layout="wide")
 
-st.title("⚡ Planejador de Compras (Versão Definitiva)")
+st.title("⚡ Planejador de Compras (Versão Anti-Corrupção)")
 
 # --- SIDEBAR ---
 st.sidebar.header("⚙️ Configurações")
@@ -22,31 +22,23 @@ uploaded_file = st.file_uploader("Suba o relatório da Olist", type=["xls", "xls
 if uploaded_file:
     df = None
     try:
-        # Volta o cursor do arquivo para o início (garante leitura limpa)
+        # Usa o motor 'calamine', especialista em arquivos mal formatados/corrompidos
         uploaded_file.seek(0)
-        
-        # Lê usando o motor exato dependendo da extensão do arquivo
-        if uploaded_file.name.endswith('.xls'):
-            df = pd.read_excel(uploaded_file, engine='xlrd')
-        elif uploaded_file.name.endswith('.xlsx'):
-            df = pd.read_excel(uploaded_file, engine='openpyxl')
-        else:
-            df = pd.read_csv(uploaded_file, sep=";", encoding='latin1')
+        df = pd.read_excel(uploaded_file, engine='calamine')
             
     except Exception as e:
-        # Se falhar, tenta o truque da Olist (HTML disfarçado de XLS)
         try:
+            # Fallback para HTML ou CSV
             uploaded_file.seek(0)
             df = pd.read_html(uploaded_file)[0]
         except:
-            st.error("Não foi possível decodificar este arquivo. Tente abri-lo no Excel e 'Salvar Como' .xlsx")
+            st.error("O arquivo original está muito corrompido pela Olist. Abra-o no seu Excel, clique em 'Salvar Como' -> '.xlsx' e suba novamente.")
 
     if df is not None:
         try:
             # LIMPEZA DINÂMICA
             df.columns = [str(c).strip() for c in df.columns]
             
-            # Se a coluna SKU não estiver no topo, procura onde ela está
             if 'Código (SKU)' not in df.columns:
                 for i in range(min(15, len(df))):
                     row_vals = [str(x).strip() for x in df.iloc[i].values]
@@ -55,22 +47,17 @@ if uploaded_file:
                         df = df.iloc[i+1:]
                         break
 
-            # Limpa espaços extras novamente após achar o cabeçalho
             df.columns = [str(c).strip() for c in df.columns]
 
-            # Identificando colunas
             col_sku = 'Código (SKU)'
             col_saidas = 'Saídas'
             
-            # Procura dinamicamente a coluna de "Saldo em [Data]"
             col_saldo_final = [c for c in df.columns if 'Saldo em' in str(c) or 'Saldo final' in str(c)]
             col_saldo_final = col_saldo_final[-1] if col_saldo_final else df.columns[-1]
 
-            # Convertendo texto para números (caso venha sujo)
             df[col_saidas] = pd.to_numeric(df[col_saidas], errors='coerce').fillna(0)
             df[col_saldo_final] = pd.to_numeric(df[col_saldo_final], errors='coerce').fillna(0)
             
-            # Remove linhas em branco que não são produtos
             df = df.dropna(subset=[col_sku])
 
             # --- CÁLCULOS ---
@@ -109,4 +96,3 @@ if uploaded_file:
 
         except Exception as e:
             st.error(f"Erro ao processar a tabela: {e}")
-            st.write("Verifique se as colunas estão corretas:", list(df.columns))
