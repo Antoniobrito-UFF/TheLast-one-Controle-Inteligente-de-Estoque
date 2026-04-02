@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 import io
 import urllib.parse
@@ -8,8 +7,11 @@ import os
 
 st.set_page_config(page_title="Controle de Estoque D&G Tech", layout="wide")
 
+# Função auxiliar para formatar moeda no padrão brasileiro (R$ 1.234,56)
+def formatar_moeda(valor):
+    return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
 # --- LOGO E TÍTULO ---
-# Verifica se a imagem da logo existe na mesma pasta do GitHub
 if os.path.exists("Logo alta qualidade fundo azul.jpg"):
     st.image("Logo alta qualidade fundo azul.jpg", width=250)
 
@@ -31,12 +33,12 @@ if uploaded_file:
     try:
         uploaded_file.seek(0)
         df = pd.read_excel(uploaded_file, engine='calamine')
-    except Exception as e:
+    except Exception:
         try:
             uploaded_file.seek(0)
             df = pd.read_html(uploaded_file)[0]
         except:
-            st.error("O arquivo original está muito corrompido pela Olist. Abra-o no Excel, clique em 'Salvar Como' -> '.xlsx' e suba novamente.")
+            st.error("Erro ao ler o arquivo. Tente salvar como .xlsx no Excel antes de subir.")
 
     if df is not None:
         try:
@@ -52,87 +54,100 @@ if uploaded_file:
                         break
 
             df.columns = [str(c).strip() for c in df.columns]
-
             col_sku = 'Código (SKU)'
             col_saidas = 'Saídas'
-            
             col_saldo_final = [c for c in df.columns if 'Saldo em' in str(c) or 'Saldo final' in str(c)]
             col_saldo_final = col_saldo_final[-1] if col_saldo_final else df.columns[-1]
 
             df[col_saidas] = pd.to_numeric(df[col_saidas], errors='coerce').fillna(0)
             df[col_saldo_final] = pd.to_numeric(df[col_saldo_final], errors='coerce').fillna(0)
-            
             df = df.dropna(subset=[col_sku])
 
-            # --- CÁLCULOS ---
-            # 1. Venda Média Diária
+            # --- CÁLCULOS LOGÍSTICOS ---
             df['Venda Média Diária'] = (df[col_saidas] / dias_analise).round(2)
-            
-            # 2. Dias Restantes (Inteiro)
-            df['Dias_Restantes'] = df[col_saldo_final] / df['Venda Média Diária']
-            df['Dias_Restantes'] = df['Dias_Restantes'].replace([float('inf')], 999).fillna(999)
-            df['Dias_Restantes'] = df['Dias_Restantes'].astype(int) 
+            df['Dias_Restantes'] = (df[col_saldo_final] / df['Venda Média Diária']).replace([float('inf')], 999).fillna(999).astype(int)
+            df['Qtd_Sugerida'] = ((df['Venda Média Diária'] * dias_cobertura) - df[col_saldo_final]).apply(lambda x: int(x) if x > 0 else 0)
 
-            # 3. Quantidade Sugerida
-            df['Qtd_Sugerida'] = (df['Venda Média Diária'] * dias_cobertura) - df[col_saldo_final]
-            df['Qtd_Sugerida'] = df['Qtd_Sugerida'].apply(lambda x: int(x) if x > 0 else 0)
-
-            # 4. Data Limite para Pedido
             def calcular_data(dias):
-                if dias >= 999:
-                    return "Estoque OK"
+                if dias >= 999: return "Estoque OK"
                 dias_para_zerar = dias - lead_time_total
-                if dias_para_zerar <= 0:
-                    return "🚨 COMPRAR HOJE!"
-                
-                data_compra = datetime.now() + timedelta(days=dias_para_zerar)
-                return data_compra.strftime('%d/%m/%Y')
+                if dias_para_zerar <= 0: return "🚨 COMPRAR HOJE!"
+                return (datetime.now() + timedelta(days=dias_para_zerar)).strftime('%d/%m/%Y')
 
             df['Data Limite P/ Pedido'] = df['Dias_Restantes'].apply(calcular_data)
-
-            # --- EXIBIÇÃO (Sem cores) ---
-            st.subheader("📋 Diagnóstico de Inventário")
             
-            colunas_exibir = [col_sku, 'Produto', col_saldo_final, 'Venda Média Diária', 'Dias_Restantes', 'Qtd_Sugerida', 'Data Limite P/ Pedido']
-            # Agora renderizamos a tabela de forma simples e limpa
-            st.dataframe(df[colunas_exibir])
+            # --- PREPARAÇÃO FINANCEIRA ---
+            # Cria a coluna de custo com valor zero (será editada pelo usuário)
+            if 'Custo Unitário (R$)' not in df.columns:
+                df['Custo Unitário (R$)'] = 0.0
 
-            # --- AÇÕES (XML E WHATSAPP) ---
             st.divider()
-            st.subheader("🚀 Ações")
+            st.subheader("📋 Diagnóstico e Planejamento Financeiro")
+            st.markdown("⚠️ **Dica:** Dê um duplo clique na coluna `Custo Unitário (R$)` para digitar o preço de compra de cada produto e simular o custo do pedido.")
+
+            colunas_exibir = [col_sku, 'Produto', 'Custo Unitário (R$)', col_saldo_final, 'Venda Média Diária', 'Dias_Restantes', 'Qtd_Sugerida', 'Data Limite P/ Pedido']
             
-            df_compra = df[df['Qtd_Sugerida'] > 0]
+            # --- TABELA INTERATIVA ---
+            # st.data_editor permite que o usuário edite APENAS a coluna de custo
+            df_editado = st.data_editor(
+                df[colunas_exibir],
+                disabled=[col_sku, 'Produto', col_saldo_final, 'Venda Média Diária', 'Dias_Restantes', 'Qtd_Sugerida', 'Data Limite P/ Pedido'],
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    "Custo Unitário (R$)": st.column_config.NumberColumn(
+                        "Custo Unitário (R$)",
+                        help="Digite o preço que você paga no fornecedor",
+                        min_value=0.0,
+                        format="R$ %.2f"
+                    )
+                }
+            )
+
+            # --- CÁLCULO FINANCEIRO PÓS-EDIÇÃO ---
+            # Multiplica a quantidade sugerida pelo valor digitado na tabela
+            df_editado['Custo Total Item'] = df_editado['Qtd_Sugerida'] * df_editado['Custo Unitário (R$)']
+            custo_total_pedido = df_editado['Custo Total Item'].sum()
+
+            # Bloco de destaque financeiro
+            st.info(f"💰 **Custo Estimado do Pedido de Reposição:** {formatar_moeda(custo_total_pedido)}")
+
+            # --- AÇÕES ---
+            st.divider()
+            df_compra = df_editado[df_editado['Qtd_Sugerida'] > 0].copy()
             
             if not df_compra.empty:
                 col1, col2 = st.columns(2)
                 
-                # Botão XML
-                root = ET.Element("PedidoCompra")
-                for _, row in df_compra.iterrows():
-                    item = ET.SubElement(root, "Item")
-                    ET.SubElement(item, "SKU").text = str(row[col_sku])
-                    ET.SubElement(item, "Quantidade").text = str(row['Qtd_Sugerida'])
-                
-                xml_data = ET.tostring(root, encoding='utf-8')
+                # Gerar Excel para o Fornecedor
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                    df_fornecedor = df_compra[[col_sku, 'Produto', 'Qtd_Sugerida', 'Custo Unitário (R$)', 'Custo Total Item']]
+                    df_fornecedor.columns = ['SKU', 'Descrição do Produto', 'Quantidade Solicitada', 'Custo Unitário Acordado', 'Total do Item']
+                    df_fornecedor.to_excel(writer, index=False, sheet_name='Pedido_Compra')
+                excel_data = output.getvalue()
+
                 with col1:
-                    st.download_button("📥 Baixar XML de Compra", data=xml_data, file_name="pedido_reposicao.xml", mime="application/xml")
+                    st.download_button(
+                        label="📥 Baixar Planilha para Fornecedor (Excel)",
+                        data=excel_data,
+                        file_name=f"pedido_compra_dgtech_{datetime.now().strftime('%d_%m_%Y')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
                 
-                # Botão WhatsApp
-                texto_wpp = "🚨 *Alerta de Reposição de Estoque D&G Tech* 🚨\n\n"
-                texto_wpp += "Equipa, precisamos comprar os seguintes itens para não pausar anúncios:\n\n"
-                
+                # WhatsApp Clean e Financeiro
+                texto_wpp = "*PEDIDO DE REPOSIÇÃO - D&G TECH*\n\n"
                 for _, row in df_compra.iterrows():
-                    texto_wpp += f"📦 *Produto:* {row['Produto']} (SKU: {row[col_sku]})\n"
-                    texto_wpp += f"🛒 *Quantidade:* {row['Qtd_Sugerida']} unidades\n"
-                    texto_wpp += f"📅 *Comprar até:* {row['Data Limite P/ Pedido']}\n"
-                    texto_wpp += "------------------------\n"
+                    texto_wpp += f"• {row[col_sku]} | {row['Qtd_Sugerida']} un. ({row['Produto']})\n"
                 
+                texto_wpp += f"\n💰 *Estimativa de Custo:* {formatar_moeda(custo_total_pedido)}\n"
+                texto_wpp += f"_Gerado em: {datetime.now().strftime('%d/%m/%Y %H:%M')}_"
                 link_wpp = f"https://api.whatsapp.com/send?text={urllib.parse.quote(texto_wpp)}"
                 
                 with col2:
-                    st.markdown(f'<a href="{link_wpp}" target="_blank"><button style="background-color:#25D366; color:white; border:none; padding:8px 16px; border-radius:5px; cursor:pointer; font-weight:bold;">💬 Enviar para o WhatsApp da Empresa</button></a>', unsafe_allow_html=True)
+                    st.markdown(f'<a href="{link_wpp}" target="_blank"><button style="background-color:#25D366; color:white; border:none; padding:10px 20px; border-radius:5px; cursor:pointer; font-weight:bold; width:100%;">💬 Enviar Resumo p/ WhatsApp</button></a>', unsafe_allow_html=True)
             else:
-                st.success("O seu estoque está saudável. Nenhuma compra necessária!")
+                st.success("Estoque em dia! Nenhuma compra necessária.")
 
         except Exception as e:
-            st.error(f"Erro ao processar a tabela: {e}")
+            st.error(f"Erro ao processar dados: {e}")
