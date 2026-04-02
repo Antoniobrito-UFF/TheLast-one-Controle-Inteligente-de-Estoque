@@ -3,6 +3,7 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 import io
+import urllib.parse
 
 st.set_page_config(page_title="Gestão de Estoque Olist", layout="wide")
 
@@ -22,13 +23,10 @@ uploaded_file = st.file_uploader("Suba o relatório da Olist", type=["xls", "xls
 if uploaded_file:
     df = None
     try:
-        # Usa o motor 'calamine', especialista em arquivos mal formatados/corrompidos
         uploaded_file.seek(0)
         df = pd.read_excel(uploaded_file, engine='calamine')
-            
     except Exception as e:
         try:
-            # Fallback para HTML ou CSV
             uploaded_file.seek(0)
             df = pd.read_html(uploaded_file)[0]
         except:
@@ -61,12 +59,30 @@ if uploaded_file:
             df = df.dropna(subset=[col_sku])
 
             # --- CÁLCULOS ---
-            df['VMD'] = df[col_saidas] / dias_analise
-            df['Dias_Restantes'] = df[col_saldo_final] / df['VMD']
+            # 1. Venda Média Diária
+            df['Venda Média Diária (VMD)'] = (df[col_saidas] / dias_analise).round(2)
+            
+            # 2. Dias Restantes (Inteiro)
+            df['Dias_Restantes'] = df[col_saldo_final] / df['Venda Média Diária (VMD)']
             df['Dias_Restantes'] = df['Dias_Restantes'].replace([float('inf')], 999).fillna(999)
+            df['Dias_Restantes'] = df['Dias_Restantes'].astype(int) # Transforma em número inteiro
 
-            df['Qtd_Sugerida'] = (df['VMD'] * dias_cobertura) - df[col_saldo_final]
+            # 3. Quantidade Sugerida
+            df['Qtd_Sugerida'] = (df['Venda Média Diária (VMD)'] * dias_cobertura) - df[col_saldo_final]
             df['Qtd_Sugerida'] = df['Qtd_Sugerida'].apply(lambda x: int(x) if x > 0 else 0)
+
+            # 4. Data Limite para Pedido
+            def calcular_data(dias):
+                if dias >= 999:
+                    return "Estoque OK"
+                dias_para_zerar = dias - lead_time_total
+                if dias_para_zerar <= 0:
+                    return "🚨 COMPRAR HOJE!"
+                
+                data_compra = datetime.now() + timedelta(days=dias_para_zerar)
+                return data_compra.strftime('%d/%m/%Y')
+
+            df['Data Limite P/ Pedido'] = df['Dias_Restantes'].apply(calcular_data)
 
             # --- EXIBIÇÃO ---
             st.subheader("📋 Diagnóstico de Inventário")
@@ -76,14 +92,19 @@ if uploaded_file:
                 if val <= lead_time_total + 5: return 'background-color: #fff4cc'
                 return ''
 
-            # A CORREÇÃO ESTÁ AQUI: Trocamos applymap por map
-            st.dataframe(df[[col_sku, 'Produto', col_saldo_final, 'VMD', 'Dias_Restantes', 'Qtd_Sugerida']]
-                         .style.map(highlight_row, subset=['Dias_Restantes']))
+            colunas_exibir = [col_sku, 'Produto', col_saldo_final, 'Venda Média Diária (VMD)', 'Dias_Restantes', 'Qtd_Sugerida', 'Data Limite P/ Pedido']
+            st.dataframe(df[colunas_exibir].style.map(highlight_row, subset=['Dias_Restantes']))
 
-            # --- GERAÇÃO DE XML ---
+            # --- AÇÕES (XML E WHATSAPP) ---
             st.divider()
+            st.subheader("🚀 Ações")
+            
             df_compra = df[df['Qtd_Sugerida'] > 0]
+            
             if not df_compra.empty:
+                col1, col2 = st.columns(2)
+                
+                # Botão XML
                 root = ET.Element("PedidoCompra")
                 for _, row in df_compra.iterrows():
                     item = ET.SubElement(root, "Item")
@@ -91,7 +112,23 @@ if uploaded_file:
                     ET.SubElement(item, "Quantidade").text = str(row['Qtd_Sugerida'])
                 
                 xml_data = ET.tostring(root, encoding='utf-8')
-                st.download_button("📥 Baixar XML de Compra", data=xml_data, file_name="pedido_reposicao.xml", mime="application/xml")
+                with col1:
+                    st.download_button("📥 Baixar XML de Compra", data=xml_data, file_name="pedido_reposicao.xml", mime="application/xml")
+                
+                # Botão WhatsApp
+                texto_wpp = "🚨 *Alerta de Reposição de Estoque Olist* 🚨\n\n"
+                texto_wpp += "Pessoal, precisamos comprar os seguintes itens para não pausar anúncios:\n\n"
+                
+                for _, row in df_compra.iterrows():
+                    texto_wpp += f"📦 *Produto:* {row['Produto']} (SKU: {row[col_sku]})\n"
+                    texto_wpp += f"🛒 *Quantidade:* {row['Qtd_Sugerida']} unidades\n"
+                    texto_wpp += f"📅 *Comprar até:* {row['Data Limite P/ Pedido']}\n"
+                    texto_wpp += "------------------------\n"
+                
+                link_wpp = f"https://api.whatsapp.com/send?text={urllib.parse.quote(texto_wpp)}"
+                
+                with col2:
+                    st.markdown(f'<a href="{link_wpp}" target="_blank"><button style="background-color:#25D366; color:white; border:none; padding:8px 16px; border-radius:5px; cursor:pointer; font-weight:bold;">💬 Enviar para o WhatsApp da Empresa</button></a>', unsafe_allow_html=True)
             else:
                 st.success("Seu estoque está saudável. Nenhuma compra necessária!")
 
