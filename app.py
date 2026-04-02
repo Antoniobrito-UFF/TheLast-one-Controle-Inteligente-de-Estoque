@@ -1,12 +1,12 @@
+
 import streamlit as st
 import pandas as pd
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
-import io
 
 st.set_page_config(page_title="Gestão de Estoque Olist", layout="wide")
 
-st.title("⚡ Planejador de Estoque (Versão Universal)")
+st.title("⚡ Planejador de Compras (Versão Definitiva)")
 
 # --- SIDEBAR ---
 st.sidebar.header("⚙️ Configurações")
@@ -17,56 +17,60 @@ lead_time_total = prazo_fornecedor + prazo_envio_full
 dias_cobertura = st.sidebar.number_input("Estoque para quantos dias?", min_value=1, value=30)
 
 # --- UPLOAD ---
-uploaded_file = st.file_uploader("Suba o relatório da Olist", type=None) # Aceita qualquer tipo para testar
+uploaded_file = st.file_uploader("Suba o relatório da Olist", type=["xls", "xlsx", "csv"])
 
 if uploaded_file:
     df = None
-    content = uploaded_file.read()
-    
-    # --- TENTATIVAS DE LEITURA ---
     try:
-        # Tentativa 1: HTML (Truque clássico da Olist)
-        df = pd.read_html(io.BytesIO(content))[0]
-    except:
+        # Volta o cursor do arquivo para o início (garante leitura limpa)
+        uploaded_file.seek(0)
+        
+        # Lê usando o motor exato dependendo da extensão do arquivo
+        if uploaded_file.name.endswith('.xls'):
+            df = pd.read_excel(uploaded_file, engine='xlrd')
+        elif uploaded_file.name.endswith('.xlsx'):
+            df = pd.read_excel(uploaded_file, engine='openpyxl')
+        else:
+            df = pd.read_csv(uploaded_file, sep=";", encoding='latin1')
+            
+    except Exception as e:
+        # Se falhar, tenta o truque da Olist (HTML disfarçado de XLS)
         try:
-            # Tentativa 2: Excel Real (.xlsx ou .xls)
-            df = pd.read_excel(io.BytesIO(content))
+            uploaded_file.seek(0)
+            df = pd.read_html(uploaded_file)[0]
         except:
-            try:
-                # Tentativa 3: CSV com ponto e vírgula
-                df = pd.read_csv(io.BytesIO(content), sep=";", encoding='latin1')
-                if 'Código (SKU)' not in df.columns: raise Exception
-            except:
-                try:
-                    # Tentativa 4: CSV com vírgula ou UTF-16
-                    df = pd.read_csv(io.BytesIO(content), sep=",", encoding='utf-16')
-                except:
-                    st.error("❌ Formato não reconhecido. Tente salvar o arquivo como 'Excel (.xlsx)' no seu computador antes de subir.")
+            st.error("Não foi possível decodificar este arquivo. Tente abri-lo no Excel e 'Salvar Como' .xlsx")
 
     if df is not None:
         try:
-            # LIMPEZA DE CABEÇALHO (Procurando a linha do SKU)
+            # LIMPEZA DINÂMICA
+            df.columns = [str(c).strip() for c in df.columns]
+            
+            # Se a coluna SKU não estiver no topo, procura onde ela está
             if 'Código (SKU)' not in df.columns:
-                for i in range(min(15, len(df))): # Procura nas primeiras 15 linhas
-                    row_values = [str(x).strip() for x in df.iloc[i].values]
-                    if any("SKU" in x for x in row_values):
-                        df.columns = row_values
+                for i in range(min(15, len(df))):
+                    row_vals = [str(x).strip() for x in df.iloc[i].values]
+                    if any("SKU" in x for x in row_vals):
+                        df.columns = row_vals
                         df = df.iloc[i+1:]
                         break
 
-            # Limpar nomes das colunas
+            # Limpa espaços extras novamente após achar o cabeçalho
             df.columns = [str(c).strip() for c in df.columns]
-            
-            # Identificar colunas vitais
+
+            # Identificando colunas
             col_sku = 'Código (SKU)'
             col_saidas = 'Saídas'
-            col_saldo_final = [c for c in df.columns if 'Saldo em' in c or 'Saldo final' in c]
+            
+            # Procura dinamicamente a coluna de "Saldo em [Data]"
+            col_saldo_final = [c for c in df.columns if 'Saldo em' in str(c) or 'Saldo final' in str(c)]
             col_saldo_final = col_saldo_final[-1] if col_saldo_final else df.columns[-1]
 
-            # Converter para números
-            for col in [col_saidas, col_saldo_final]:
-                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+            # Convertendo texto para números (caso venha sujo)
+            df[col_saidas] = pd.to_numeric(df[col_saidas], errors='coerce').fillna(0)
+            df[col_saldo_final] = pd.to_numeric(df[col_saldo_final], errors='coerce').fillna(0)
             
+            # Remove linhas em branco que não são produtos
             df = df.dropna(subset=[col_sku])
 
             # --- CÁLCULOS ---
@@ -88,7 +92,7 @@ if uploaded_file:
             st.dataframe(df[[col_sku, 'Produto', col_saldo_final, 'VMD', 'Dias_Restantes', 'Qtd_Sugerida']]
                          .style.applymap(highlight_row, subset=['Dias_Restantes']))
 
-            # --- XML ---
+            # --- GERAÇÃO DE XML ---
             st.divider()
             df_compra = df[df['Qtd_Sugerida'] > 0]
             if not df_compra.empty:
@@ -99,8 +103,10 @@ if uploaded_file:
                     ET.SubElement(item, "Quantidade").text = str(row['Qtd_Sugerida'])
                 
                 xml_data = ET.tostring(root, encoding='utf-8')
-                st.download_button("📥 Baixar XML de Compra", data=xml_data, file_name="compra_olist.xml")
+                st.download_button("📥 Baixar XML de Compra", data=xml_data, file_name="pedido_reposicao.xml", mime="application/xml")
+            else:
+                st.success("Seu estoque está saudável. Nenhuma compra necessária!")
 
         except Exception as e:
-            st.error(f"Erro ao organizar dados: {e}")
-            st.write("Colunas encontradas:", list(df.columns))
+            st.error(f"Erro ao processar a tabela: {e}")
+            st.write("Verifique se as colunas estão corretas:", list(df.columns))
