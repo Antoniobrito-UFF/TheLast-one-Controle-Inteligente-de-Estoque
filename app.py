@@ -4,10 +4,16 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 import io
 import urllib.parse
+import os
 
-st.set_page_config(page_title="Gestão de Estoque Olist", layout="wide")
+st.set_page_config(page_title="Controle de Estoque D&G Tech", layout="wide")
 
-st.title("⚡ Planejador de Compras (Versão Anti-Corrupção)")
+# --- LOGO E TÍTULO ---
+# Verifica se a imagem da logo existe na mesma pasta do GitHub
+if os.path.exists("Logo alta qualidade fundo azul.jpg"):
+    st.image("Logo alta qualidade fundo azul.jpg", width=250)
+
+st.title("📊 Controle Inteligente de Estoque D&G Tech")
 
 # --- SIDEBAR ---
 st.sidebar.header("⚙️ Configurações")
@@ -30,7 +36,7 @@ if uploaded_file:
             uploaded_file.seek(0)
             df = pd.read_html(uploaded_file)[0]
         except:
-            st.error("O arquivo original está muito corrompido pela Olist. Abra-o no seu Excel, clique em 'Salvar Como' -> '.xlsx' e suba novamente.")
+            st.error("O arquivo original está muito corrompido pela Olist. Abra-o no Excel, clique em 'Salvar Como' -> '.xlsx' e suba novamente.")
 
     if df is not None:
         try:
@@ -60,15 +66,15 @@ if uploaded_file:
 
             # --- CÁLCULOS ---
             # 1. Venda Média Diária
-            df['Venda Média Diária (VMD)'] = (df[col_saidas] / dias_analise).round(2)
+            df['Venda Média Diária'] = (df[col_saidas] / dias_analise).round(2)
             
             # 2. Dias Restantes (Inteiro)
-            df['Dias_Restantes'] = df[col_saldo_final] / df['Venda Média Diária (VMD)']
+            df['Dias_Restantes'] = df[col_saldo_final] / df['Venda Média Diária']
             df['Dias_Restantes'] = df['Dias_Restantes'].replace([float('inf')], 999).fillna(999)
-            df['Dias_Restantes'] = df['Dias_Restantes'].astype(int) # Transforma em número inteiro
+            df['Dias_Restantes'] = df['Dias_Restantes'].astype(int) 
 
             # 3. Quantidade Sugerida
-            df['Qtd_Sugerida'] = (df['Venda Média Diária (VMD)'] * dias_cobertura) - df[col_saldo_final]
+            df['Qtd_Sugerida'] = (df['Venda Média Diária'] * dias_cobertura) - df[col_saldo_final]
             df['Qtd_Sugerida'] = df['Qtd_Sugerida'].apply(lambda x: int(x) if x > 0 else 0)
 
             # 4. Data Limite para Pedido
@@ -84,16 +90,12 @@ if uploaded_file:
 
             df['Data Limite P/ Pedido'] = df['Dias_Restantes'].apply(calcular_data)
 
-            # --- EXIBIÇÃO ---
+            # --- EXIBIÇÃO (Sem cores) ---
             st.subheader("📋 Diagnóstico de Inventário")
             
-            def highlight_row(val):
-                if val <= lead_time_total: return 'background-color: #ffcccc'
-                if val <= lead_time_total + 5: return 'background-color: #fff4cc'
-                return ''
-
-            colunas_exibir = [col_sku, 'Produto', col_saldo_final, 'Venda Média Diária (VMD)', 'Dias_Restantes', 'Qtd_Sugerida', 'Data Limite P/ Pedido']
-            st.dataframe(df[colunas_exibir].style.map(highlight_row, subset=['Dias_Restantes']))
+            colunas_exibir = [col_sku, 'Produto', col_saldo_final, 'Venda Média Diária', 'Dias_Restantes', 'Qtd_Sugerida', 'Data Limite P/ Pedido']
+            # Agora renderizamos a tabela de forma simples e limpa
+            st.dataframe(df[colunas_exibir])
 
             # --- AÇÕES (XML E WHATSAPP) ---
             st.divider()
@@ -116,8 +118,8 @@ if uploaded_file:
                     st.download_button("📥 Baixar XML de Compra", data=xml_data, file_name="pedido_reposicao.xml", mime="application/xml")
                 
                 # Botão WhatsApp
-                texto_wpp = "🚨 *Alerta de Reposição de Estoque Olist* 🚨\n\n"
-                texto_wpp += "Pessoal, precisamos comprar os seguintes itens para não pausar anúncios:\n\n"
+                texto_wpp = "🚨 *Alerta de Reposição de Estoque D&G Tech* 🚨\n\n"
+                texto_wpp += "Equipa, precisamos comprar os seguintes itens para não pausar anúncios:\n\n"
                 
                 for _, row in df_compra.iterrows():
                     texto_wpp += f"📦 *Produto:* {row['Produto']} (SKU: {row[col_sku]})\n"
@@ -130,7 +132,7 @@ if uploaded_file:
                 with col2:
                     st.markdown(f'<a href="{link_wpp}" target="_blank"><button style="background-color:#25D366; color:white; border:none; padding:8px 16px; border-radius:5px; cursor:pointer; font-weight:bold;">💬 Enviar para o WhatsApp da Empresa</button></a>', unsafe_allow_html=True)
             else:
-                st.success("Seu estoque está saudável. Nenhuma compra necessária!")
+                st.success("O seu estoque está saudável. Nenhuma compra necessária!")
 
         except Exception as e:
             st.error(f"Erro ao processar a tabela: {e}")
