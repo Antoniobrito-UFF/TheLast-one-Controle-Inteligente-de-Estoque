@@ -76,8 +76,9 @@ if uploaded_file:
                 if val <= lead_time_total + 5: return 'background-color: #fff4cc'
                 return ''
 
+            # A CORREÇÃO ESTÁ AQUI: Trocamos applymap por map
             st.dataframe(df[[col_sku, 'Produto', col_saldo_final, 'VMD', 'Dias_Restantes', 'Qtd_Sugerida']]
-                         .style.applymap(highlight_row, subset=['Dias_Restantes']))
+                         .style.map(highlight_row, subset=['Dias_Restantes']))
 
             # --- GERAÇÃO DE XML ---
             st.divider()
