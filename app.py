@@ -6,7 +6,7 @@ import io
 
 st.set_page_config(page_title="Gestão de Estoque Olist", layout="wide")
 
-st.title("⚡ Planejador de Compras (Versão Olist Safe)")
+st.title("⚡ Planejador de Compras (Versão Final)")
 
 # --- SIDEBAR ---
 st.sidebar.header("⚙️ Configurações")
@@ -22,40 +22,48 @@ uploaded_file = st.file_uploader("Suba o relatório da Olist", type=["xls", "xls
 if uploaded_file:
     df = None
     try:
-        # Tentativa 1: Ler como Excel padrão (XLSX)
-        df = pd.read_excel(uploaded_file)
+        # Tenta ler como HTML (padrão Olist XLS)
+        uploaded_file.seek(0)
+        df = pd.read_html(uploaded_file)[0]
     except:
         try:
-            # Tentativa 2: Forçar leitura de XLS (caso seja um HTML disfarçado)
+            # Tenta ler como Excel real
             uploaded_file.seek(0)
-            df = pd.read_html(uploaded_file)[0]
+            df = pd.read_excel(uploaded_file)
         except:
-            try:
-                # Tentativa 3: Ler como CSV (caso o separador seja ponto e vírgula)
-                uploaded_file.seek(0)
-                df = pd.read_csv(uploaded_file, sep=";", encoding='latin1')
-            except Exception as e:
-                st.error(f"Erro crítico ao processar o arquivo. Detalhes: {e}")
+            st.error("Não foi possível processar o formato deste arquivo.")
 
     if df is not None:
         try:
-            # Limpeza básica: remover linhas vazias
-            df = df.dropna(subset=['Código (SKU)'])
+            # LIMPEZA DINÂMICA: Procura a linha onde as colunas reais começam
+            # Se a primeira coluna não for 'Código (SKU)', vamos procurar a linha correta
+            if 'Código (SKU)' not in df.columns:
+                for i in range(len(df)):
+                    if "SKU" in str(df.iloc[i].values):
+                        df.columns = df.iloc[i] # Transforma essa linha no cabeçalho
+                        df = df.iloc[i+1:] # Remove as linhas de cima
+                        break
             
-            # Identificando colunas
+            # Remove espaços extras dos nomes das colunas
+            df.columns = [str(c).strip() for c in df.columns]
+            
+            # Mapeamento de colunas
             col_sku = 'Código (SKU)'
             col_produto = 'Produto'
             col_saidas = 'Saídas'
             col_saldo_final = df.columns[-1] 
 
-            # Converter para número (caso venha como texto do HTML)
+            # Garantir que são números
             df[col_saidas] = pd.to_numeric(df[col_saidas], errors='coerce').fillna(0)
             df[col_saldo_final] = pd.to_numeric(df[col_saldo_final], errors='coerce').fillna(0)
+            
+            # Remover linhas que não tenham SKU (como rodapés)
+            df = df.dropna(subset=[col_sku])
 
             # --- CÁLCULOS ---
             df['VMD'] = df[col_saidas] / dias_analise
             df['Dias_Restantes'] = df[col_saldo_final] / df['VMD']
-            df['Dias_Restantes'] = df['Dias_Restantes'].fillna(999).replace([float('inf')], 999)
+            df['Dias_Restantes'] = df['Dias_Restantes'].replace([float('inf')], 999).fillna(999)
 
             df['Qtd_Sugerida'] = (df['VMD'] * dias_cobertura) - df[col_saldo_final]
             df['Qtd_Sugerida'] = df['Qtd_Sugerida'].apply(lambda x: int(x) if x > 0 else 0)
@@ -73,10 +81,11 @@ if uploaded_file:
                 if val <= lead_time_total + 5: return 'background-color: #fff4cc'
                 return ''
 
-            st.dataframe(df[[col_sku, col_produto, col_saldo_final, 'VMD', 'Dias_Restantes', 'Qtd_Sugerida', 'Data_Pedido']]
-                         .style.applymap(highlight_row, subset=['Dias_Restantes']))
+            # Mostra apenas as colunas importantes para não poluir
+            exibir = [col_sku, col_produto, col_saldo_final, 'VMD', 'Dias_Restantes', 'Qtd_Sugerida', 'Data_Pedido']
+            st.dataframe(df[exibir].style.applymap(highlight_row, subset=['Dias_Restantes']))
 
-            # --- XML ---
+            # --- GERAÇÃO DE XML ---
             st.divider()
             df_compra = df[df['Qtd_Sugerida'] > 0]
             if not df_compra.empty:
@@ -84,10 +93,13 @@ if uploaded_file:
                 for _, row in df_compra.iterrows():
                     item = ET.SubElement(root, "Item")
                     ET.SubElement(item, "SKU").text = str(row[col_sku])
-                    ET.SubElement(item, "Quantidade").text = str(row['Qtd_Sugerida'])
+                    ET.SubElement(item, "Qtd").text = str(row['Qtd_Sugerida'])
 
                 xml_str = ET.tostring(root, encoding='utf-8')
-                st.download_button("📥 Baixar XML de Compra", data=xml_str, file_name="compra.xml", mime="application/xml")
-        
+                st.download_button("📥 Baixar XML de Compra", data=xml_str, file_name="pedido_estoque.xml", mime="application/xml")
+            else:
+                st.success("Estoque saudável!")
+
         except Exception as e:
-            st.error(f"Erro na estrutura das colunas: {e}")
+            st.error(f"Erro ao processar as colunas: {e}")
+            st.write("Colunas detectadas:", list(df.columns))
