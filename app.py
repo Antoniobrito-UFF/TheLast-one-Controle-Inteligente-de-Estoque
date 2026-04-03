@@ -17,13 +17,13 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 def carregar_base():
     try:
         # Agora o sistema sabe exatamente qual arquivo abrir
-        return conn.read(spreadsheet=URL_PLANILHA, worksheet="Base_Custos", ttl="1m")
+        return conn.read(spreadsheet=URL_PLANILHA, worksheet="Base_Custos_DGTech", ttl="1m")
     except:
         return pd.DataFrame(columns=['SKU', 'Produto', 'Custo Unitário'])
 
 def salvar_base(df):
     # Agora o sistema sabe exatamente onde salvar
-    conn.update(spreadsheet=URL_PLANILHA, worksheet="Base_Custos", data=df)
+    conn.update(spreadsheet=URL_PLANILHA, worksheet="Base_Custos_DGTech", data=df)
     st.cache_data.clear()
 
 if os.path.exists("Logo alta qualidade fundo azul.jpg"):
