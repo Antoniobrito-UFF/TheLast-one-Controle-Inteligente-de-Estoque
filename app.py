@@ -10,7 +10,7 @@ st.set_page_config(page_title="Controle Inteligente D&G Tech", layout="wide")
 # ==========================================
 # 🔴 COLE O LINK (URL) DA SUA PLANILHA AQUI:
 # ==========================================
-URL_PLANILHA = "https://docs.google.com/spreadsheets/d/1PkR-fMgs3EA6Cxa_eTgRmD-tbXzrhazR6PXn3C-SOEk/edit?gid=0#gid=0"
+URL_PLANILHA = "https://docs.google.com/spreadsheets/d/1PkR-fMgs3EA6Cxa_eTgRmD-tbXzrhazR6PXn3C-SOEk/edit?gid=1319897969#gid=1319897969"
 
 # --- CONEXÃO GOOGLE SHEETS ---
 conn = st.connection("gsheets", type=GSheetsConnection)
@@ -57,10 +57,6 @@ def ajustar_lote_compra(row):
     else:
         return int(((qtd_exata + multiplo - 1) // multiplo) * multiplo)
 
-# --- ALERTA DE SEXTA-FEIRA ---
-if datetime.now().weekday() == 4:
-    st.error("🚨 **ALERTA DE SEXTA-FEIRA:** Lembre-se de subir o relatório Olist de 4 semanas (28 dias) para planejar a próxima semana!")
-
 if os.path.exists("Logo alta qualidade fundo azul.jpg"):
     st.image("Logo alta qualidade fundo azul.jpg", width=220)
 
@@ -74,7 +70,6 @@ if not status_atual.empty and 'Data_Ruptura' in status_atual.columns:
     status_atual['Data_Ruptura'] = pd.to_datetime(status_atual['Data_Ruptura'], errors='coerce')
     hoje_dt = pd.Timestamp(datetime.now().date())
     
-    # Esta é a linha que deu erro de sintaxe antes (agora está segura)
     risco = status_atual[status_atual['Data_Ruptura'] <= hoje_dt + timedelta(days=10)].dropna()
     
     if not risco.empty:
@@ -135,7 +130,6 @@ with tab1:
     prazo_total = st.sidebar.number_input("Prazo Logístico Total (dias):", value=10)
     dias_cobertura = st.sidebar.number_input("Estoque para quantos dias?", value=30)
 
-    # CORREÇÃO: Extensões permitidas adicionadas
     uploaded_file = st.file_uploader("Suba o relatório da Olist", type=["xlsx", "xls", "csv"])
 
     if uploaded_file:
@@ -150,7 +144,6 @@ with tab1:
 
             df_olist = df_olist.dropna(subset=[col_sku])
             
-            # CORREÇÃO FORTE DE TIPOS (Evita o erro str vs float64)
             df_olist[col_sku] = df_olist[col_sku].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
             df_olist[col_saidas] = pd.to_numeric(df_olist[col_saidas], errors='coerce').fillna(0)
             df_olist[col_saldo_final] = pd.to_numeric(df_olist[col_saldo_final], errors='coerce').fillna(0)
