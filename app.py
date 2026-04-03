@@ -1,24 +1,29 @@
 import streamlit as st
 import pandas as pd
 from streamlit_gsheets import GSheetsConnection
-from datetime import datetime, timedelta
 import io
-import urllib.parse
 import os
 
 st.set_page_config(page_title="Controle Inteligente D&G Tech", layout="wide")
+
+# ==========================================
+# 🔴 COLE O LINK DA SUA PLANILHA AQUI ABAIXO:
+# ==========================================
+URL_PLANILHA = "https://docs.google.com/spreadsheets/d/1PkR-fMgs3EA6Cxa_eTgRmD-tbXzrhazR6PXn3C-SOEk/edit?gid=0#gid=0"
 
 # --- CONEXÃO GOOGLE SHEETS ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def carregar_base():
     try:
-        return conn.read(worksheet="Base_Custos", ttl="1m")
+        # Agora o sistema sabe exatamente qual arquivo abrir
+        return conn.read(spreadsheet=URL_PLANILHA, worksheet="Base_Custos", ttl="1m")
     except:
         return pd.DataFrame(columns=['SKU', 'Produto', 'Custo Unitário'])
 
 def salvar_base(df):
-    conn.update(worksheet="Base_Custos", data=df)
+    # Agora o sistema sabe exatamente onde salvar
+    conn.update(spreadsheet=URL_PLANILHA, worksheet="Base_Custos", data=df)
     st.cache_data.clear()
 
 if os.path.exists("Logo alta qualidade fundo azul.jpg"):
@@ -48,13 +53,12 @@ with tab1:
     dias_analise = st.sidebar.number_input("Dias do relatório da Olist:", min_value=1, value=30)
     
     st.sidebar.subheader("📈 Acelerador de Tendência")
-    st.sidebar.markdown("*Como o relatório da Olist não fornece dados dia a dia para cálculo exponencial, este fator compensa o crescimento inflando a média.*")
+    st.sidebar.markdown("*Compensa o crescimento da empresa inflando a média de vendas diárias.*")
     fator_crescimento = st.sidebar.slider("Aceleração de Vendas (%)", 0, 50, 10)
     
     prazo_total = st.sidebar.number_input("Prazo Logístico Total (dias):", value=10)
     dias_cobertura = st.sidebar.number_input("Estoque para quantos dias?", value=30)
 
-    # CORREÇÃO 1: Adicionado "xls" para não dar erro de formato
     uploaded_file = st.file_uploader("Suba o relatório da Olist", type=["xls", "xlsx", "csv"])
 
     if uploaded_file:
@@ -64,7 +68,7 @@ with tab1:
             # Limpeza de colunas
             df_olist.columns = [str(c).strip() for c in df_olist.columns]
             
-            # CORREÇÃO 2: Busca dinâmica pelas colunas corretas para não dar "KeyError"
+            # Busca dinâmica pelas colunas corretas
             col_sku = 'Código (SKU)'
             col_saidas = 'Saídas'
             col_saldo_final = [c for c in df_olist.columns if 'Saldo' in str(c)]
@@ -83,7 +87,7 @@ with tab1:
                 st.warning(f"Adicionando {len(novos)} novos SKUs à base de dados...")
                 novos['Custo Unitário'] = 0.0
                 base_nova = pd.concat([base_custos, novos], ignore_index=True)
-                salvar_base(base_nova)
+                salvar_base(base_nova) # Agora isso vai funcionar sem erros!
                 base_custos = base_nova
 
             df = df_olist.merge(base_custos[['SKU', 'Custo Unitário']], left_on=col_sku, right_on='SKU', how='left')
@@ -98,7 +102,7 @@ with tab1:
             
             st.subheader("📋 Diagnóstico de Reposição")
             
-            # Exibição limpa
+            # Exibição
             colunas_exibir = [col_sku, 'Produto', 'Custo Unitário', col_saldo_final, 'Venda Média Diária', 'Dias_Restantes', 'Qtd_Sugerida', 'Total Pedido']
             st.dataframe(df[colunas_exibir])
             
