@@ -3,3 +3,4 @@ pandas
 openpyxl
 python-calamine
 xlsxwriter
+st-gsheets-connection
