@@ -16,13 +16,12 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 
 def carregar_base():
     try:
-        # Agora o sistema sabe exatamente qual arquivo abrir
         return conn.read(spreadsheet=URL_PLANILHA, worksheet="Base_Custos", ttl="1m")
     except:
-        return pd.DataFrame(columns=['SKU', 'Produto', 'Custo Unitário'])
+        # Atualizado para o novo nome da coluna
+        return pd.DataFrame(columns=['Código (SKU)', 'Produto', 'Custo Unitário'])
 
 def salvar_base(df):
-    # Agora o sistema sabe exatamente onde salvar
     conn.update(spreadsheet=URL_PLANILHA, worksheet="Base_Custos", data=df)
     st.cache_data.clear()
 
@@ -74,23 +73,34 @@ with tab1:
             col_saldo_final = [c for c in df_olist.columns if 'Saldo' in str(c)]
             col_saldo_final = col_saldo_final[-1] if col_saldo_final else df_olist.columns[-1]
 
+            # Remove linhas sem SKU primeiro
+            df_olist = df_olist.dropna(subset=[col_sku])
+            
+            # Forçando os SKUs a serem sempre Texto (String) na planilha da Olist
+            df_olist[col_sku] = df_olist[col_sku].astype(str).str.strip()
+
+            # Ajuste de números para as colunas de cálculos
             df_olist[col_saidas] = pd.to_numeric(df_olist[col_saidas], errors='coerce').fillna(0)
             df_olist[col_saldo_final] = pd.to_numeric(df_olist[col_saldo_final], errors='coerce').fillna(0)
-            df_olist = df_olist.dropna(subset=[col_sku])
 
             # Sincronização Sheets
             base_custos = carregar_base()
+            
+            # 🛡️ CORREÇÃO: Lendo a coluna com o nome novo que você colocou na sua planilha
+            base_custos['Código (SKU)'] = base_custos['Código (SKU)'].astype(str).str.strip()
+            
             skus_olist = df_olist[[col_sku, 'Produto']].drop_duplicates()
-            novos = skus_olist[~skus_olist[col_sku].isin(base_custos['SKU'].tolist())]
+            novos = skus_olist[~skus_olist[col_sku].isin(base_custos['Código (SKU)'].tolist())]
             
             if not novos.empty:
                 st.warning(f"Adicionando {len(novos)} novos SKUs à base de dados...")
                 novos['Custo Unitário'] = 0.0
                 base_nova = pd.concat([base_custos, novos], ignore_index=True)
-                salvar_base(base_nova) # Agora isso vai funcionar sem erros!
+                salvar_base(base_nova)
                 base_custos = base_nova
 
-            df = df_olist.merge(base_custos[['SKU', 'Custo Unitário']], left_on=col_sku, right_on='SKU', how='left')
+            # Como as duas planilhas agora têm a coluna "Código (SKU)", o merge fica mais simples e direto!
+            df = df_olist.merge(base_custos[['Código (SKU)', 'Custo Unitário']], on='Código (SKU)', how='left')
             
             # CÁLCULOS COM FATOR DE CRESCIMENTO
             df['VMD_Pura'] = df[col_saidas] / dias_analise
