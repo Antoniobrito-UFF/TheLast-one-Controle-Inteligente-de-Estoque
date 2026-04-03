@@ -8,8 +8,7 @@ import os
 st.set_page_config(page_title="Controle Inteligente D&G Tech", layout="wide")
 
 # ==========================================
-# 🔴 COLE O LINK (URL) DA SUA PLANILHA AQUI ABAIXO:
-# (Exemplo: "https://docs.google.com/spreadsheets/d/1BxiMVs0X...")
+# 🔴 COLE O LINK (URL) DA SUA PLANILHA AQUI:
 # ==========================================
 URL_PLANILHA = "https://docs.google.com/spreadsheets/d/1PkR-fMgs3EA6Cxa_eTgRmD-tbXzrhazR6PXn3C-SOEk/edit?gid=0#gid=0"
 
@@ -26,10 +25,9 @@ def salvar_base(df):
     conn.update(spreadsheet=URL_PLANILHA, worksheet="Base_Custos", data=df)
     st.cache_data.clear()
 
-# --- ALERTA DE SEXTA-FEIRA ---
-# O Python considera: 0=Segunda, 1=Terça, 2=Quarta, 3=Quinta, 4=Sexta, 5=Sábado, 6=Domingo
+# --- ALERTA DE SEXTA-FEIRA NO SITE ---
 if datetime.now().weekday() == 4:
-    st.error("🚨 **ALERTA AUTOMÁTICO DE SEXTA-FEIRA:** Dia de gerar o relatório de 4 semanas (28 dias) na Olist para planejar o estoque da próxima semana!")
+    st.error("🚨 **ALERTA DE SEXTA-FEIRA:** Lembre-se de subir o relatório Olist de 4 semanas (28 dias) para planejar a próxima semana!")
 
 if os.path.exists("Logo alta qualidade fundo azul.jpg"):
     st.image("Logo alta qualidade fundo azul.jpg", width=220)
@@ -54,14 +52,27 @@ with tab2:
 
 # --- ABA 1: PLANEJADOR ---
 with tab1:
-    st.sidebar.header("⚙️ Parâmetros")
+    st.sidebar.header("⚙️ Parâmetros de Tempo")
     
-    # AJUSTE 1: Deixando claro que os dias precisam bater com o arquivo da Olist
-    dias_analise = st.sidebar.number_input("Período escolhido no relatório Olist (em dias):", min_value=1, value=30)
-    st.sidebar.caption("⚠️ *Importante: Digite aqui a quantidade exata de dias que você escolheu ao baixar o Excel da Olist.*")
+    # -----------------------------------------------------
+    # SOLUÇÃO 1: Intervalo de Datas para Cálculo Automático
+    # -----------------------------------------------------
+    st.sidebar.markdown("**Selecione o exato intervalo puxado na Olist:**")
+    col1, col2 = st.sidebar.columns(2)
+    data_inicio = col1.date_input("De")
+    data_fim = col2.date_input("Até")
     
+    # Calcula quantos dias tem entre as datas selecionadas (+1 para incluir o dia de hoje)
+    dias_analise = (data_fim - data_inicio).days + 1
+    
+    if dias_analise <= 0:
+        st.sidebar.error("A data final deve ser maior que a inicial.")
+        dias_analise = 1 # Evitar divisão por zero e travar o código
+    else:
+        st.sidebar.info(f"O sistema usará **{dias_analise} dias** para calcular a Venda Média Diária.")
+
+    st.sidebar.divider()
     st.sidebar.subheader("📈 Acelerador de Tendência")
-    st.sidebar.markdown("*Compensa o crescimento da empresa inflando a média de vendas diárias.*")
     fator_crescimento = st.sidebar.slider("Aceleração de Vendas (%)", 0, 50, 10)
     
     prazo_total = st.sidebar.number_input("Prazo Logístico Total (dias):", value=10)
@@ -72,7 +83,6 @@ with tab1:
     if uploaded_file:
         try:
             df_olist = pd.read_excel(uploaded_file, engine='calamine')
-            
             df_olist.columns = [str(c).strip() for c in df_olist.columns]
             
             col_sku = 'Código (SKU)'
@@ -82,7 +92,6 @@ with tab1:
 
             df_olist = df_olist.dropna(subset=[col_sku])
             df_olist[col_sku] = df_olist[col_sku].astype(str).str.strip()
-
             df_olist[col_saidas] = pd.to_numeric(df_olist[col_saidas], errors='coerce').fillna(0)
             df_olist[col_saldo_final] = pd.to_numeric(df_olist[col_saldo_final], errors='coerce').fillna(0)
 
@@ -101,6 +110,7 @@ with tab1:
 
             df = df_olist.merge(base_custos[['Código (SKU)', 'Custo Unitário']], on='Código (SKU)', how='left')
             
+            # Cálculo usando os dias reais do calendário escolhido na lateral
             df['VMD_Pura'] = df[col_saidas] / dias_analise
             df['Venda Média Diária'] = df['VMD_Pura'] * (1 + (fator_crescimento / 100))
             
@@ -109,14 +119,15 @@ with tab1:
             df['Total Pedido'] = df['Qtd_Sugerida'] * df['Custo Unitário']
             
             st.subheader("📋 Diagnóstico de Reposição")
-            
             colunas_exibir = [col_sku, 'Produto', 'Custo Unitário', col_saldo_final, 'Venda Média Diária', 'Dias_Restantes', 'Qtd_Sugerida', 'Total Pedido']
             st.dataframe(df[colunas_exibir])
             
             custo_total = df['Total Pedido'].sum()
             st.metric("Investimento Total Necessário", f"R$ {custo_total:,.2f}")
 
-            # --- AJUSTE 3: A VOLTA DO WHATSAPP ---
+            # -----------------------------------------------------
+            # SOLUÇÃO 3: Retorno do Botão de Envio para WhatsApp
+            # -----------------------------------------------------
             st.divider()
             df_compra = df[df['Qtd_Sugerida'] > 0].copy()
             
