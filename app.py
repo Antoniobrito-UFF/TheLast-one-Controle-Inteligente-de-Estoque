@@ -28,26 +28,26 @@ def salvar_base(df):
 # --- FUNÇÃO DE ARREDONDAMENTO POR CAIXAS FECHADAS ---
 def ajustar_lote_compra(row):
     nome = str(row['Produto']).upper()
-    # Pega a quantidade matemática exata que já foi calculada e clipada em zero
     qtd_exata = row['Qtd_Sugerida_Matematica']
     
     if qtd_exata <= 0:
         return 0
         
-    if 'UNIPOLAR' in nome:
+    # Radar inteligente para capturar variações no nome do produto
+    if any(palavra in nome for palavra in ['UNIPOLAR', 'MONOPOLAR', '1P', '1 P']):
         multiplo = 12
-    elif 'BIPOLAR' in nome:
+    elif any(palavra in nome for palavra in ['BIPOLAR', '2P', '2 P', '2 POLOS']):
         multiplo = 6
-    elif 'TRIPOLAR' in nome:
+    elif any(palavra in nome for palavra in ['TRIPOLAR', '3P', '3 P', '3 POLOS']):
         multiplo = 3
     else:
-        return int(qtd_exata) # Se não for disjuntor, mantém o valor normal
+        return int(qtd_exata) # Itens que não são disjuntores mantêm o valor normal
         
-    # Regras para os disjuntores:
+    # Regra da Caixa Fechada
     if qtd_exata < multiplo:
-        return 0 # Se precisa de menos que uma caixa, não compra
+        return 0 # Se precisa de menos que uma caixa, zera a compra
     else:
-        # Arredonda para cima, para o próximo múltiplo da caixa
+        # Arredonda sempre para cima, para o próximo múltiplo da caixa
         return int(((qtd_exata + multiplo - 1) // multiplo) * multiplo)
 
 # --- ALERTA DE SEXTA-FEIRA NO SITE ---
@@ -82,19 +82,17 @@ with tab1:
     st.sidebar.markdown("**Selecione o exato intervalo puxado na Olist:**")
     col1, col2 = st.sidebar.columns(2)
     
-    # 🛡️ CORREÇÃO: Definindo um padrão de 30 dias para evitar o erro dos R$ 66.000
     hoje = datetime.today()
     trinta_dias_atras = hoje - timedelta(days=30)
     
     data_inicio = col1.date_input("De", value=trinta_dias_atras)
     data_fim = col2.date_input("Até", value=hoje)
     
-    # Calcula quantos dias tem entre as datas selecionadas (+1 para incluir o dia de hoje)
     dias_analise = (data_fim - data_inicio).days + 1
     
     if dias_analise <= 0:
         st.sidebar.error("A data final deve ser maior que a inicial.")
-        dias_analise = 1 # Evitar divisão por zero e travar o código
+        dias_analise = 1
     else:
         st.sidebar.info(f"O sistema usará **{dias_analise} dias** para calcular a Venda Média Diária.")
 
@@ -105,7 +103,8 @@ with tab1:
     prazo_total = st.sidebar.number_input("Prazo Logístico Total (dias):", value=10)
     dias_cobertura = st.sidebar.number_input("Estoque para quantos dias?", value=30)
 
-    uploaded_file = st.file_uploader("Suba o relatório da Olist", type=["xls", "xlsx", "csv"])
+    # Botão de upload sem restrição de extensão para evitar o erro do arquivo MS-Excel
+    uploaded_file = st.file_uploader("Suba o relatório da Olist")
 
     if uploaded_file:
         try:
@@ -118,12 +117,15 @@ with tab1:
             col_saldo_final = col_saldo_final[-1] if col_saldo_final else df_olist.columns[-1]
 
             df_olist = df_olist.dropna(subset=[col_sku])
-            df_olist[col_sku] = df_olist[col_sku].astype(str).str.strip()
+            
+            # 🛡️ CORREÇÃO DE TIPO: Forçando tudo para TEXTO para não dar erro de float64
+            df_olist[col_sku] = df_olist[col_sku].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
             df_olist[col_saidas] = pd.to_numeric(df_olist[col_saidas], errors='coerce').fillna(0)
             df_olist[col_saldo_final] = pd.to_numeric(df_olist[col_saldo_final], errors='coerce').fillna(0)
 
             base_custos = carregar_base()
-            base_custos['Código (SKU)'] = base_custos['Código (SKU)'].astype(str).str.strip()
+            # 🛡️ CORREÇÃO DE TIPO: Forçando a base para TEXTO também
+            base_custos['Código (SKU)'] = base_custos['Código (SKU)'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
             
             skus_olist = df_olist[[col_sku, 'Produto']].drop_duplicates()
             novos = skus_olist[~skus_olist[col_sku].isin(base_custos['Código (SKU)'].tolist())]
@@ -137,18 +139,15 @@ with tab1:
 
             df = df_olist.merge(base_custos[['Código (SKU)', 'Custo Unitário']], on='Código (SKU)', how='left')
             
-            # --- CÁLCULO SEGURO ---
             df['VMD_Pura'] = df[col_saidas] / dias_analise
             df['Venda Média Diária'] = df['VMD_Pura'] * (1 + (fator_crescimento / 100))
             df['Dias_Restantes'] = (df[col_saldo_final] / df['Venda Média Diária']).replace([float('inf')], 999).fillna(999).astype(int)
             
-            # 1. Primeiro descobre a quantidade exata matemática
             df['Qtd_Sugerida_Matematica'] = ((df['Venda Média Diária'] * dias_cobertura) - df[col_saldo_final]).clip(lower=0).astype(int)
             
-            # 2. Depois aplica a regra de caixas fechadas dos disjuntores
+            # Aplica a função ajustada que lê Monopolar, 1p, 2p, etc.
             df['Qtd_Sugerida'] = df.apply(ajustar_lote_compra, axis=1)
             
-            # 3. Calcula o total financeiro baseado na quantidade já arredondada
             df['Total Pedido'] = df['Qtd_Sugerida'] * df['Custo Unitário']
             
             st.subheader("📋 Diagnóstico de Reposição")
@@ -158,9 +157,6 @@ with tab1:
             custo_total = df['Total Pedido'].sum()
             st.metric("Investimento Total Necessário", f"R$ {custo_total:,.2f}")
 
-            # -----------------------------------------------------
-            # NOVO FORMATO WHATSAPP PARA FORNECEDOR (Sem SKU)
-            # -----------------------------------------------------
             st.divider()
             df_compra = df[df['Qtd_Sugerida'] > 0].copy()
             
