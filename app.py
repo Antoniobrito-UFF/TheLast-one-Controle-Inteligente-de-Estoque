@@ -14,7 +14,7 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 def carregar_base():
     try:
         # Tenta ler a planilha; se não existir, cria estrutura básica
-        return conn.read(worksheet="Base_Custos", ttl="1m")
+        return conn.read(worksheet="Base_Custos_DGTech", ttl="1m")
     except:
         return pd.DataFrame(columns=['SKU', 'Produto', 'Custo Unitário'])
 
