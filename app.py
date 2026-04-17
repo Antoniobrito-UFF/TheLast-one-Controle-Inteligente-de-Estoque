@@ -43,11 +43,11 @@ def ajustar_lote_compra(row):
     if qtd_exata <= 0:
         return 0
         
-    if any(palavra in nome for palavra in ['UNIPOLAR', 'MONOPOLAR', '1P', '1 P']):
+    if any(palavra in nome for palabra in ['UNIPOLAR', 'MONOPOLAR', '1P', '1 P']):
         multiplo = 12
-    elif any(palavra in nome for palavra in ['BIPOLAR', '2P', '2 P', '2 POLOS']):
+    elif any(palavra in nome for palabra in ['BIPOLAR', '2P', '2 P', '2 POLOS']):
         multiplo = 6
-    elif any(palavra in nome for palavra in ['TRIPOLAR', '3P', '3 P', '3 POLOS']):
+    elif any(palavra in nome for palabra in ['TRIPOLAR', '3P', '3 P', '3 POLOS']):
         multiplo = 3
     else:
         return int(qtd_exata)
@@ -70,13 +70,10 @@ if not status_atual.empty and 'Data_Ruptura' in status_atual.columns:
     status_atual['Data_Ruptura'] = pd.to_datetime(status_atual['Data_Ruptura'], errors='coerce')
     hoje_dt = pd.Timestamp(datetime.now().date())
     
-    # Verifica se a nova coluna já existe na planilha para não quebrar nos primeiros testes
     if 'Data_Limite_Compra' in status_atual.columns:
         status_atual['Data_Limite_Compra'] = pd.to_datetime(status_atual['Data_Limite_Compra'], errors='coerce')
-        # Entra em risco se o dia de hoje já chegou ou passou da data limite de compra
         risco = status_atual[hoje_dt >= status_atual['Data_Limite_Compra']].dropna()
     else:
-        # Fallback de segurança se a coluna nova ainda não foi gerada
         risco = status_atual[status_atual['Data_Ruptura'] <= hoje_dt + timedelta(days=10)].dropna()
     
     if not risco.empty:
@@ -84,7 +81,7 @@ if not status_atual.empty and 'Data_Ruptura' in status_atual.columns:
         for i, (_, r) in enumerate(risco.iterrows()):
             dias_restantes = (r['Data_Ruptura'] - hoje_dt).days
             with cols[i % 4]:
-                if dias_restantes < 0:
+                if dias_restantes <= 0:
                     st.error(f"**{r['Produto']}**\n\nESTOQUE ESGOTADO!")
                 else:
                     st.warning(f"**{r['Produto']}**\n\n⚠️ Ação Necessária!\nAcaba em: {dias_restantes} dias")
@@ -172,12 +169,16 @@ with tab1:
             
             df['VMD_Pura'] = df[col_saidas] / dias_analise
             df['Venda Média Diária'] = df['VMD_Pura'] * (1 + (fator_crescimento / 100))
-            df['Dias_Restantes'] = (df[col_saldo_final] / df['Venda Média Diária']).replace([float('inf')], 999).fillna(999).astype(int)
             
-            # --- CÁLCULO DAS DATAS IMPORTANTES ---
+            # --- AJUSTE: DIAS RESTANTES NÃO NEGATIVOS ---
+            df['Dias_Restantes'] = (df[col_saldo_final] / df['Venda Média Diária']).replace([float('inf')], 999).fillna(0)
+            df['Dias_Restantes'] = df['Dias_Restantes'].clip(lower=0).astype(int)
+            
+            # --- CÁLCULO DAS DATAS ---
             df['Data_Ruptura'] = [datetime.now().date() + timedelta(days=min(d, 365)) for d in df['Dias_Restantes']]
             df['Data_Limite_Compra'] = [d - timedelta(days=int(prazo_total)) for d in df['Data_Ruptura']]
             
+            # --- AJUSTE: QUANTIDADE SUGERIDA NÃO NEGATIVA ---
             df['Qtd_Sugerida_Matematica'] = ((df['Venda Média Diária'] * dias_cobertura) - df[col_saldo_final]).clip(lower=0).astype(int)
             df['Qtd_Sugerida'] = df.apply(ajustar_lote_compra, axis=1)
             df['Total Pedido'] = df['Qtd_Sugerida'] * df['Custo Unitário']
@@ -189,13 +190,12 @@ with tab1:
             custo_total = df['Total Pedido'].sum()
             st.metric("Investimento Total Necessário", f"R$ {custo_total:,.2f}")
 
-            # GRAVAR RADAR COM A COLUNA NOVA
             if st.button("📌 Gravar Previsão no Radar"):
                 previsao = df[['Produto', 'Data_Ruptura', 'Data_Limite_Compra']].copy()
                 previsao['Data_Ruptura'] = previsao['Data_Ruptura'].astype(str)
                 previsao['Data_Limite_Compra'] = previsao['Data_Limite_Compra'].astype(str)
                 salvar_radar(previsao)
-                st.success("Radar atualizado com o seu Prazo Logístico! Recarregue a página para ver no topo.")
+                st.success("Radar atualizado! Dados negativos foram tratados como estoque zero.")
 
             st.divider()
             df_compra = df[df['Qtd_Sugerida'] > 0].copy()
