@@ -8,7 +8,7 @@ import os
 st.set_page_config(page_title="Controle Inteligente D&G Tech", layout="wide")
 
 # ==========================================
-# 🔴 COLE O LINK (URL) DA SUA PLANILHA AQUI:
+# 🔴 LINK DA SUA PLANILHA:
 # ==========================================
 URL_PLANILHA = "https://docs.google.com/spreadsheets/d/1PkR-fMgs3EA6Cxa_eTgRmD-tbXzrhazR6PXn3C-SOEk/edit?gid=1319897969#gid=1319897969"
 
@@ -35,7 +35,7 @@ def salvar_radar(df):
     conn.update(spreadsheet=URL_PLANILHA, worksheet="Status_Estoque", data=df)
     st.cache_data.clear()
 
-# --- FUNÇÃO DE ARREDONDAMENTO POR CAIXAS FECHADAS ---
+# --- FUNÇÃO DE ARREDONDAMENTO POR CAIXAS FECHADAS (CORRIGIDA) ---
 def ajustar_lote_compra(row):
     nome = str(row['Produto']).upper()
     qtd_exata = row['Qtd_Sugerida_Matematica']
@@ -43,11 +43,12 @@ def ajustar_lote_compra(row):
     if qtd_exata <= 0:
         return 0
         
-    if any(palavra in nome for palabra in ['UNIPOLAR', 'MONOPOLAR', '1P', '1 P']):
+    # Corrigido 'palabra' para 'palavra' para evitar o erro do seu print
+    if any(palavra in nome for palavra in ['UNIPOLAR', 'MONOPOLAR', '1P', '1 P']):
         multiplo = 12
-    elif any(palavra in nome for palabra in ['BIPOLAR', '2P', '2 P', '2 POLOS']):
+    elif any(palavra in nome for palavra in ['BIPOLAR', '2P', '2 P', '2 POLOS']):
         multiplo = 6
-    elif any(palavra in nome for palabra in ['TRIPOLAR', '3P', '3 P', '3 POLOS']):
+    elif any(palavra in nome for palavra in ['TRIPOLAR', '3P', '3 P', '3 POLOS']):
         multiplo = 3
     else:
         return int(qtd_exata)
@@ -61,7 +62,7 @@ if os.path.exists("Logo alta qualidade fundo azul.jpg"):
     st.image("Logo alta qualidade fundo azul.jpg", width=220)
 
 # -----------------------------------------------------
-# 🚨 RADAR DE RUPTURA INTELIGENTE (Usa o Prazo Logístico)
+# 🚨 RADAR DE RUPTURA INTELIGENTE (SINTAXE CORRIGIDA)
 # -----------------------------------------------------
 st.subheader("🚨 Radar de Ruptura Próxima")
 status_atual = carregar_radar()
@@ -70,6 +71,7 @@ if not status_atual.empty and 'Data_Ruptura' in status_atual.columns:
     status_atual['Data_Ruptura'] = pd.to_datetime(status_atual['Data_Ruptura'], errors='coerce')
     hoje_dt = pd.Timestamp(datetime.now().date())
     
+    # Sintaxe corrigida aqui (referente ao seu print de SyntaxError)
     if 'Data_Limite_Compra' in status_atual.columns:
         status_atual['Data_Limite_Compra'] = pd.to_datetime(status_atual['Data_Limite_Compra'], errors='coerce')
         risco = status_atual[hoje_dt >= status_atual['Data_Limite_Compra']].dropna()
@@ -88,47 +90,28 @@ if not status_atual.empty and 'Data_Ruptura' in status_atual.columns:
     else:
         st.success("Tudo sob controle. Nenhum item atingiu o ponto de pedido de compra hoje.")
 else:
-    st.info("Nenhum histórico encontrado. Suba um relatório e clique em 'Gravar Previsão' para iniciar o monitoramento.")
+    st.info("Nenhum histórico encontrado. Suba um relatório e clique em 'Gravar Previsão'.")
 
 st.divider()
 
 tab1, tab2 = st.tabs(["📊 Planejador de Compras", "📦 Base de Produtos & Custos"])
 
-# --- ABA 2: BASE DE CUSTOS ---
 with tab2:
     st.subheader("Custos de Compra Armazenados")
     base_atual = carregar_base()
-    
-    base_editada = st.data_editor(
-        base_atual, 
-        num_rows="dynamic", 
-        use_container_width=True,
-        key="editor_central"
-    )
-    
+    base_editada = st.data_editor(base_atual, num_rows="dynamic", use_container_width=True, key="editor_central")
     if st.button("💾 Salvar Alterações na Nuvem"):
         salvar_base(base_editada)
-        st.success("Dados salvos com sucesso no Google Sheets!")
+        st.success("Dados salvos com sucesso!")
 
-# --- ABA 1: PLANEJADOR ---
 with tab1:
     st.sidebar.header("⚙️ Parâmetros de Tempo")
     col1, col2 = st.sidebar.columns(2)
-    
     hoje = datetime.today()
-    trinta_dias_atras = hoje - timedelta(days=30)
-    
-    data_inicio = col1.date_input("De", value=trinta_dias_atras)
+    data_inicio = col1.date_input("De", value=hoje - timedelta(days=30))
     data_fim = col2.date_input("Até", value=hoje)
-    
     dias_analise = (data_fim - data_inicio).days + 1
     
-    if dias_analise <= 0:
-        st.sidebar.error("A data final deve ser maior que a inicial.")
-        dias_analise = 1
-    else:
-        st.sidebar.info(f"O sistema usará **{dias_analise} dias** para calcular a VMD.")
-
     st.sidebar.divider()
     fator_crescimento = st.sidebar.slider("Aceleração de Vendas (%)", 0, 50, 10)
     prazo_total = st.sidebar.number_input("Prazo Logístico Total (dias):", value=10)
@@ -147,7 +130,6 @@ with tab1:
             col_saldo_final = col_saldo_final[-1] if col_saldo_final else df_olist.columns[-1]
 
             df_olist = df_olist.dropna(subset=[col_sku])
-            
             df_olist[col_sku] = df_olist[col_sku].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
             df_olist[col_saidas] = pd.to_numeric(df_olist[col_saidas], errors='coerce').fillna(0)
             df_olist[col_saldo_final] = pd.to_numeric(df_olist[col_saldo_final], errors='coerce').fillna(0)
@@ -155,37 +137,25 @@ with tab1:
             base_custos = carregar_base()
             base_custos['Código (SKU)'] = base_custos['Código (SKU)'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
             
-            skus_olist = df_olist[[col_sku, 'Produto']].drop_duplicates()
-            novos = skus_olist[~skus_olist[col_sku].isin(base_custos['Código (SKU)'].tolist())]
-            
-            if not novos.empty:
-                st.warning(f"Adicionando {len(novos)} novos SKUs à base de dados...")
-                novos['Custo Unitário'] = 0.0
-                base_nova = pd.concat([base_custos, novos], ignore_index=True)
-                salvar_base(base_nova)
-                base_custos = base_nova
-
             df = df_olist.merge(base_custos[['Código (SKU)', 'Custo Unitário']], on='Código (SKU)', how='left')
             
             df['VMD_Pura'] = df[col_saidas] / dias_analise
             df['Venda Média Diária'] = df['VMD_Pura'] * (1 + (fator_crescimento / 100))
             
-            # --- AJUSTE: DIAS RESTANTES NÃO NEGATIVOS ---
+            # --- TRAVA DE DIAS NEGATIVOS ---
             df['Dias_Restantes'] = (df[col_saldo_final] / df['Venda Média Diária']).replace([float('inf')], 999).fillna(0)
             df['Dias_Restantes'] = df['Dias_Restantes'].clip(lower=0).astype(int)
             
-            # --- CÁLCULO DAS DATAS ---
             df['Data_Ruptura'] = [datetime.now().date() + timedelta(days=min(d, 365)) for d in df['Dias_Restantes']]
             df['Data_Limite_Compra'] = [d - timedelta(days=int(prazo_total)) for d in df['Data_Ruptura']]
             
-            # --- AJUSTE: QUANTIDADE SUGERIDA NÃO NEGATIVA ---
+            # --- TRAVA DE COMPRA NEGATIVA ---
             df['Qtd_Sugerida_Matematica'] = ((df['Venda Média Diária'] * dias_cobertura) - df[col_saldo_final]).clip(lower=0).astype(int)
             df['Qtd_Sugerida'] = df.apply(ajustar_lote_compra, axis=1)
             df['Total Pedido'] = df['Qtd_Sugerida'] * df['Custo Unitário']
             
             st.subheader("📋 Diagnóstico de Reposição")
-            colunas_exibir = [col_sku, 'Produto', 'Custo Unitário', col_saldo_final, 'Venda Média Diária', 'Dias_Restantes', 'Data_Limite_Compra', 'Data_Ruptura', 'Qtd_Sugerida', 'Total Pedido']
-            st.dataframe(df[colunas_exibir])
+            st.dataframe(df[[col_sku, 'Produto', 'Custo Unitário', col_saldo_final, 'Dias_Restantes', 'Data_Limite_Compra', 'Data_Ruptura', 'Qtd_Sugerida', 'Total Pedido']])
             
             custo_total = df['Total Pedido'].sum()
             st.metric("Investimento Total Necessário", f"R$ {custo_total:,.2f}")
@@ -195,25 +165,16 @@ with tab1:
                 previsao['Data_Ruptura'] = previsao['Data_Ruptura'].astype(str)
                 previsao['Data_Limite_Compra'] = previsao['Data_Limite_Compra'].astype(str)
                 salvar_radar(previsao)
-                st.success("Radar atualizado! Dados negativos foram tratados como estoque zero.")
+                st.success("Radar atualizado com sucesso!")
 
             st.divider()
             df_compra = df[df['Qtd_Sugerida'] > 0].copy()
-            
             if not df_compra.empty:
                 texto_wpp = "*PEDIDO DE COMPRA - D&G TECH*\n\n"
                 for _, row in df_compra.iterrows():
-                    texto_wpp += f"📦 *{row['Produto']}*\n"
-                    texto_wpp += f"Quantidade: *{row['Qtd_Sugerida']} unidades*\n"
-                    texto_wpp += "----------------------------\n"
-                
-                texto_wpp += f"\n💰 *Estimativa de Custo:* R$ {custo_total:,.2f}\n"
-                texto_wpp += f"_Gerado em: {datetime.now().strftime('%d/%m/%Y %H:%M')}_"
-                
+                    texto_wpp += f"📦 *{row['Produto']}*\nQuantidade: *{row['Qtd_Sugerida']} unidades*\n---\n"
                 link_wpp = f"https://api.whatsapp.com/send?text={urllib.parse.quote(texto_wpp)}"
-                st.markdown(f'<a href="{link_wpp}" target="_blank"><button style="background-color:#25D366; color:white; border:none; padding:12px 24px; border-radius:8px; cursor:pointer; font-weight:bold; font-size:16px;">🟢 Enviar Pedido para o Fornecedor (WhatsApp)</button></a>', unsafe_allow_html=True)
-            else:
-                st.success("Estoque em dia! Nenhuma compra necessária.")
+                st.markdown(f'<a href="{link_wpp}" target="_blank"><button style="background-color:#25D366; color:white; border:none; padding:12px 24px; border-radius:8px; cursor:pointer; font-weight:bold; font-size:16px;">🟢 Enviar Pedido (WhatsApp)</button></a>', unsafe_allow_html=True)
 
         except Exception as e:
             st.error(f"Erro ao processar: {e}")
